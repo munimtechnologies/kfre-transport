@@ -4,15 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kfretransport"
-version = "0.2.1"
-description = "Open, tested KFRE/eGFR equations, calibration metrics (including competing-risk O/E), an OMOP CDM cohort builder and a pre-registered simulation of informative uACR testing across health systems (research only, not medical advice)"
+version = "0.2.2"
+description = "Open, tested KFRE/eGFR equations, calibration metrics (including competing-risk O/E with a delta-method variance), multi-site pooling with small-cell masking, an OMOP CDM cohort builder, a pre-registered simulation and a pre-registered NHANES study of informative uACR testing (research only, not medical advice)"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.9"
 authors = [{name = "MV2, Munim, Inc.", email = "mv2@munimtech.com"}]
 
+[project.optional-dependencies]
+nhanes = ["pandas"]
+
 [project.scripts]
 kfre-omop = "kfretransport.omop:main"
+kfre-pool = "kfretransport.pool:main"
+kfre-nhanes = "kfretransport.nhanes:main"
 
 [tool.setuptools]
 packages = ["kfretransport"]

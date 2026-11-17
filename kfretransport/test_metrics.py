@@ -5,6 +5,7 @@ import unittest
 
 from kfretransport.metrics import (brier, c_statistic, calibration_in_the_large,
                                    calibration_slope, cumulative_incidence,
+                                   cumulative_incidence_variance,
                                    dersimonian_laird, km_risk, meta_regression,
                                    observed_expected, oe_time_to_event, t975)
 
@@ -110,10 +111,59 @@ class TestTimeToEvent(unittest.TestCase):
         self.assertAlmostEqual(r["se_log_oe"], 0.7071068, places=6)
         r = oe_time_to_event(T5, E5, [0.25] * 5, 10, competing=False)
         self.assertAlmostEqual(r["oe"], 2.4, places=12)
+        self.assertEqual(r["events"], 2)
         r = oe_time_to_event(T5, E5, [0.25] * 5, 1)
         self.assertEqual((r["oe"], r["events"], r["se_log_oe"]), (0.0, 0, None))
+        self.assertIsNone(r["se_log_oe_dm"])
         with self.assertRaises(ValueError):
             oe_time_to_event(T5, E5, [0.25] * 4, 10)
+
+
+class TestAalenJohansenVariance(unittest.TestCase):
+    def test_worked_example(self):
+        # event times (Y, d, d1, S-, F after): t=2 (5,1,1,1.0,0.2), t=3 (4,1,0,0.8,0.2),
+        # t=5 (2,1,1,0.6,0.5); F(10) = 0.5
+        # term 1: 0.3^2*1/(5*4) + 0.3^2*1/(4*3) + 0 = 0.0045 + 0.0075 = 0.012
+        # term 2: 1*1*4/125 + 0 + 0.36*1*1/8 = 0.032 + 0.045 = 0.077
+        # term 3: -2 * (0.3*1*1/25 + 0 + 0) = -0.024
+        # var = 0.065; se = 0.2549510; se(ln O) = 0.2549510 / 0.5 = 0.5099020
+        cif, var, n = cumulative_incidence_variance(T5, E5, 10)
+        self.assertAlmostEqual(cif, 0.5, places=12)
+        self.assertAlmostEqual(var, 0.065, places=12)
+        self.assertEqual(n, 2)
+        r = oe_time_to_event(T5, E5, [0.25] * 5, 10)
+        self.assertAlmostEqual(r["var_observed_risk"], 0.065, places=12)
+        self.assertAlmostEqual(r["se_log_oe_dm"], 0.5099020, places=6)
+
+    def test_no_censoring_is_multinomial(self):
+        # 10 people: t=1 2 KRT + 3 deaths; t=2 1 KRT; 4 followed past the horizon.
+        # F = 0.2 + 0.5*1/5 = 0.3; multinomial variance 0.3*0.7/10 = 0.021
+        # term 1: 0.1^2 * 5/(10*5) = 0.001; term 2: 2*8/1000 + 0.25*1*4/125 = 0.024;
+        # term 3: -2 * 0.1 * 1 * 2/100 = -0.004; total 0.021
+        times = [1] * 5 + [2] + [9] * 4
+        events = [1, 1, 2, 2, 2, 1, 0, 0, 0, 0]
+        cif, var, n = cumulative_incidence_variance(times, events, 5)
+        self.assertAlmostEqual(cif, 0.3, places=12)
+        self.assertAlmostEqual(var, 0.021, places=12)
+        self.assertEqual(n, 3)
+
+    def test_no_competing_is_greenwood(self):
+        # death censored (1 - KM): S = 0.4, Greenwood 0.16 * (1/(5*4) + 1/(2*1)) = 0.088
+        # delta form: 0.4^2/20 + (4/125 + 0.64/8) - 2*0.4/25 = 0.008 + 0.112 - 0.032
+        r = oe_time_to_event(T5, E5, [0.25] * 5, 10, competing=False)
+        self.assertAlmostEqual(r["var_observed_risk"], 0.088, places=12)
+        # sqrt(0.088) = 0.2966479; / 0.6 = 0.4944132
+        self.assertAlmostEqual(r["se_log_oe_dm"], 0.4944132, places=6)
+
+    def test_edges(self):
+        # one of two at risk has KRT, the other censored then: 1*1*1/8 = 0.125
+        self.assertAlmostEqual(cumulative_incidence_variance([2, 2], [1, 0], 3)[1], 0.125,
+                               places=12)
+        # everyone at risk has the event: Y = d, F = 1, variance 0
+        cif, var, _ = cumulative_incidence_variance([1, 1], [1, 1], 2)
+        self.assertEqual((cif, var), (1.0, 0.0))
+        with self.assertRaises(ValueError):
+            cumulative_incidence_variance([], [], 1)
 
 
 class TestPooling(unittest.TestCase):
