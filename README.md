@@ -29,6 +29,25 @@ who gets a urine albumin (uACR) test?**
   risk by about 7% (Ravani et al., JASN 2019;30:2219-2227, PMID 31540963). A transportability
   study must therefore say which "observed risk" it compares the KFRE with.
 
+## New in 0.2.4: how many health systems a study needs
+
+`kfretransport/power.py` computes the power of a multi-site study to detect the selection
+effect, and the number of sites it needs. Findings note:
+[findings/power-design-2026-11-17.md](findings/power-design-2026-11-17.md).
+
+- To first order the selection effect enters through the inverse Mills ratio
+  m(p) = phi(Phi^-1(p)) / p of each site's testing rate p. So **sites that test few people carry
+  most of the information**. A network whose testing rates span 10-70% needs about 4 times fewer
+  sites than one whose rates span 20-50% (hand calculation).
+- Hand values for 80% power, rates spread over 10-70%, about 50 kidney-failure events per site
+  and residual between-site variance tau^2 = 0.05: about 13 sites if theta = 0.69 (all of
+  SCREAM's O/E 2.11 would then be selection), about 58 if theta = 0.3, and about 490 if
+  theta = 0.1. For scale, N3C had 84 contributing sites in August 2024. Exact values are
+  queued as the job `kfre-power-v1`.
+- The pre-registered linear primary (addendum 1) keeps about 98% of the curve test's efficiency
+  over that spread. In every design the linear test is never more powerful than the curve test
+  (Cauchy-Schwarz), and the tests check this.
+
 ## New in 0.2.3: a closed-form selection-calibration curve
 
 If the part of kidney-failure risk that the KFRE's predictors miss is correlated with who gets
@@ -52,14 +71,15 @@ pre-specified secondary analysis
 ([findings/protocol-addendum-2-2026-11-17.md](findings/protocol-addendum-2-2026-11-17.md)).
 It has **not** been run on any real data.
 
-## What is here (version 0.2.3)
+## What is here (version 0.2.4)
 
 | Module | What it does | Checked by |
 |---|---|---|
 | `kfretransport/equations.py` | CKD-EPI 2021 (race-free) and 2009 creatinine eGFR; 4-variable KFRE (2- and 5-year; North American and non-North American baselines); KDIGO G and A categories; unit conversions | hand-worked unit tests (`test_equations.py`) |
 | `kfretransport/metrics.py` | O/E, Brier, C-statistic, logistic calibration slope/intercept and calibration-in-the-large, DerSimonian-Laird pooling with I^2 and a 95% prediction interval for a new site, random-effects meta-regression with Knapp-Hartung inference, Aalen-Johansen cumulative incidence (death competing), 1 - Kaplan-Meier (death censored), time-to-event O/E; delta-method (Greenwood-type) variance of the Aalen-Johansen estimate and `se_log_oe_dm` | hand-worked unit tests (`test_metrics.py`), including checks that the variance equals the multinomial variance without censoring and Greenwood's variance without competing events |
 | `kfretransport/pool.py` | pools site summaries from `omop.py` into the pre-declared primary and secondary analyses (random-effects O/E and meta-regression on the site's testing rate) and masks small cells in published per-site rows | hand-worked unit tests (`test_pool.py`) |
-| `kfretransport/selection.py` (new) | the selection-calibration curve for tested and untested people, theta from one site's O/E, its exact risk-scale version by quadrature, and a multi-site fit of theta with a profile-likelihood interval | unit tests (`test_selection.py`): hand values from normal tables, exact identities, agreement of the quadrature with the closed form for rare outcomes, recovery of a known theta |
+| `kfretransport/selection.py` | the selection-calibration curve for tested and untested people, theta from one site's O/E, its exact risk-scale version by quadrature, and a multi-site fit of theta with a profile-likelihood interval | unit tests (`test_selection.py`): hand values from normal tables, exact identities, agreement of the quadrature with the closed form for rare outcomes, recovery of a known theta |
+| `kfretransport/power.py` (new) | Fisher information and standard error for theta, power of the curve test and of the linear meta-regression test, the number of sites needed, a design table, and a seeded Monte Carlo check of the profile-likelihood test | unit tests (`test_power.py`): exact identities (power = alpha at theta = 0, linear <= curve), finite-difference derivatives, a hand-computed two-point design, Monte Carlo agreement |
 | `kfretransport/nhanes.py` | pre-registered public-data study: applies US testing patterns to NHANES 2007-2018, where everyone has a uACR, and measures what they do to KFRE scoring and uACR imputation | hand-worked unit tests on invented records (`test_nhanes.py`); **not run on NHANES yet** |
 | `kfretransport/albuminuria.py` | estimated uACR from a urine protein-to-creatinine ratio (Sumida et al. 2020 crude equation), for a sensitivity analysis only | tests that it reproduces five figures the paper reports (`test_albuminuria.py`); see provenance note below |
 | `kfretransport/sim.py` | synthetic multi-site study of informative uACR testing (4 scenarios) | property tests (`test_sim.py`); the full study is pre-registered and queued, **not run yet** |
@@ -77,6 +97,7 @@ python -m kfretransport.omop --cdm-dir path/to/omop_csv --out site-a-pcr.json --
 python -m kfretransport.pool site-a.json site-b.json site-c.json --out pooled.json --min-cell 20
 python -m kfretransport.nhanes --data-dir nhanes-data --out-dir out
 python -m kfretransport.selection --theta 0.1 0.3 0.69 --rates 0.1 0.25 0.4 0.63 0.9
+python -m kfretransport.power --theta 0.3 0.69 --site-variance 0.02 --tau2 0.05 --spread 0.1 0.7
 ```
 
 ## Pre-registrations and protocol
@@ -94,6 +115,8 @@ python -m kfretransport.selection --theta 0.1 0.3 0.69 --rates 0.1 0.25 0.4 0.63
   NHANES study, four predictions (H1-H4), queued. Its primary estimand is the
   `selection_ratio`: how much more imputing uACR from tested people misstates the untested
   group's KFRE under US testing rates than under non-selective testing.
+- [findings/power-design-2026-11-17.md](findings/power-design-2026-11-17.md): sample-size
+  reasoning for the multi-site study (a design calculation, not a prediction).
 
 ### OMOP cohort definitions (pre-declared in `omop.py`)
 
@@ -168,6 +191,8 @@ site stands. Details and sources:
   will be published here whatever they show.
 - Selection-calibration curve (0.2.3): an analytic result plus tested code; not yet fitted to
   any real or simulated multi-site data.
+- Power and sample size (0.2.4): analytic, with hand-computed values; the exact table and a
+  larger Monte Carlo check are queued (`kfre-power-v1`).
 - OMOP code: tested only on invented records. It has **not** yet run on any OMOP database,
   synthetic or real. A smoke test on OHDSI's public synthetic Synthea27Nj set is queued.
 - Not done: any real health-system data; a container; expert review.
