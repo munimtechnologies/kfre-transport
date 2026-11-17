@@ -29,14 +29,38 @@ who gets a urine albumin (uACR) test?**
   risk by about 7% (Ravani et al., JASN 2019;30:2219-2227, PMID 31540963). A transportability
   study must therefore say which "observed risk" it compares the KFRE with.
 
-## What is here (version 0.2.2)
+## New in 0.2.3: a closed-form selection-calibration curve
+
+If the part of kidney-failure risk that the KFRE's predictors miss is correlated with who gets
+tested, then among the tested
+
+    O/E (tested) = Phi(Phi^-1(p) + theta) / p      relative to the whole cohort's O/E,
+
+where p is the site's testing rate and theta is a single number: the covariance between the
+unexplained log-hazard and the testing propensity (Gaussian unexplained risk, probit testing;
+exact for the hazard, and for the risk when the outcome is rare). Its consequences:
+
+- Selection on the KFRE's own predictors does not miscalibrate the KFRE.
+- Less testing means more apparent under-prediction among the tested, and the relationship is
+  curved, not linear.
+- The untested get the mirror image.
+
+If all of Stockholm's O/E of 2.11 came from selective testing, theta would be 0.69. Derivation,
+tables, limits and the prior-art search are in
+[findings/selection-curve-2026-11-17.md](findings/selection-curve-2026-11-17.md). It is a
+pre-specified secondary analysis
+([findings/protocol-addendum-2-2026-11-17.md](findings/protocol-addendum-2-2026-11-17.md)).
+It has **not** been run on any real data.
+
+## What is here (version 0.2.3)
 
 | Module | What it does | Checked by |
 |---|---|---|
 | `kfretransport/equations.py` | CKD-EPI 2021 (race-free) and 2009 creatinine eGFR; 4-variable KFRE (2- and 5-year; North American and non-North American baselines); KDIGO G and A categories; unit conversions | hand-worked unit tests (`test_equations.py`) |
-| `kfretransport/metrics.py` | O/E, Brier, C-statistic, logistic calibration slope/intercept and calibration-in-the-large, DerSimonian-Laird pooling with I^2 and a 95% prediction interval for a new site, random-effects meta-regression with Knapp-Hartung inference, Aalen-Johansen cumulative incidence (death competing), 1 - Kaplan-Meier (death censored), time-to-event O/E; **new in 0.2.2:** delta-method (Greenwood-type) variance of the Aalen-Johansen estimate and `se_log_oe_dm` | hand-worked unit tests (`test_metrics.py`), including checks that the variance equals the multinomial variance without censoring and Greenwood's variance without competing events |
-| `kfretransport/pool.py` (new) | pools site summaries from `omop.py` into the pre-declared primary and secondary analyses (random-effects O/E and meta-regression on the site's testing rate) and masks small cells in published per-site rows | hand-worked unit tests (`test_pool.py`) |
-| `kfretransport/nhanes.py` (new) | pre-registered public-data study: applies US testing patterns to NHANES 2007-2018, where everyone has a uACR, and measures what they do to KFRE scoring and uACR imputation | hand-worked unit tests on invented records (`test_nhanes.py`); **not run on NHANES yet** |
+| `kfretransport/metrics.py` | O/E, Brier, C-statistic, logistic calibration slope/intercept and calibration-in-the-large, DerSimonian-Laird pooling with I^2 and a 95% prediction interval for a new site, random-effects meta-regression with Knapp-Hartung inference, Aalen-Johansen cumulative incidence (death competing), 1 - Kaplan-Meier (death censored), time-to-event O/E; delta-method (Greenwood-type) variance of the Aalen-Johansen estimate and `se_log_oe_dm` | hand-worked unit tests (`test_metrics.py`), including checks that the variance equals the multinomial variance without censoring and Greenwood's variance without competing events |
+| `kfretransport/pool.py` | pools site summaries from `omop.py` into the pre-declared primary and secondary analyses (random-effects O/E and meta-regression on the site's testing rate) and masks small cells in published per-site rows | hand-worked unit tests (`test_pool.py`) |
+| `kfretransport/selection.py` (new) | the selection-calibration curve for tested and untested people, theta from one site's O/E, its exact risk-scale version by quadrature, and a multi-site fit of theta with a profile-likelihood interval | unit tests (`test_selection.py`): hand values from normal tables, exact identities, agreement of the quadrature with the closed form for rare outcomes, recovery of a known theta |
+| `kfretransport/nhanes.py` | pre-registered public-data study: applies US testing patterns to NHANES 2007-2018, where everyone has a uACR, and measures what they do to KFRE scoring and uACR imputation | hand-worked unit tests on invented records (`test_nhanes.py`); **not run on NHANES yet** |
 | `kfretransport/albuminuria.py` | estimated uACR from a urine protein-to-creatinine ratio (Sumida et al. 2020 crude equation), for a sensitivity analysis only | tests that it reproduces five figures the paper reports (`test_albuminuria.py`); see provenance note below |
 | `kfretransport/sim.py` | synthetic multi-site study of informative uACR testing (4 scenarios) | property tests (`test_sim.py`); the full study is pre-registered and queued, **not run yet** |
 | `kfretransport/conceptsets.py` | concept sets written as LOINC / SNOMED / ICD10CM / UCUM **codes**, not OMOP ids; unit tables (also uPCR); plausible ranges | each code checked on 2026-11-16 against tx.fhir.org (LOINC 2.83, SNOMED CT International 2026-07-01, ICD-10-CM 2026-04-01) |
@@ -52,6 +76,7 @@ python -m kfretransport.omop --cdm-dir path/to/omop_csv --out site-a.json
 python -m kfretransport.omop --cdm-dir path/to/omop_csv --out site-a-pcr.json --pcr-conversion
 python -m kfretransport.pool site-a.json site-b.json site-c.json --out pooled.json --min-cell 20
 python -m kfretransport.nhanes --data-dir nhanes-data --out-dir out
+python -m kfretransport.selection --theta 0.1 0.3 0.69 --rates 0.1 0.25 0.4 0.63 0.9
 ```
 
 ## Pre-registrations and protocol
@@ -60,6 +85,9 @@ python -m kfretransport.nhanes --data-dir nhanes-data --out-dir out
   the primary multi-site analysis, fixed before any real data. It uses log O/E with
   Aalen-Johansen O and the delta-method variance, random effects, and meta-regression on the
   site's measured-uACR testing rate. The predicted slope is negative.
+- [findings/protocol-addendum-2-2026-11-17.md](findings/protocol-addendum-2-2026-11-17.md):
+  a secondary analysis that fits the selection-calibration curve across sites; prediction
+  theta > 0.
 - [findings/sim-prereg-v1-2026-11-16.md](findings/sim-prereg-v1-2026-11-16.md): simulation
   study, seven predictions (S1-S7), queued.
 - [findings/nhanes-testing-prereg-v1-2026-11-17.md](findings/nhanes-testing-prereg-v1-2026-11-17.md):
@@ -92,10 +120,10 @@ python -m kfretransport.nhanes --data-dir nhanes-data --out-dir out
 | `tte_km` | **everyone** with a prediction | 1 - Kaplan-Meier, death treated as censoring |
 
 The expected risk is the mean KFRE prediction of the same people. Each time-to-event entry has
-two standard errors of log O/E: `se_log_oe` (Poisson, 1/sqrt(events)) and, new in 0.2.2,
-`se_log_oe_dm` (delta-method variance of the Aalen-Johansen or Kaplan-Meier estimate, E held
-fixed; the form printed in Marubini and Valsecchi 1995 and in the R package cifmodeling's
-formula vignette). The primary analysis uses `tte_aj` with `se_log_oe_dm`.
+two standard errors of log O/E: `se_log_oe` (Poisson, 1/sqrt(events)) and `se_log_oe_dm`
+(delta-method variance of the Aalen-Johansen or Kaplan-Meier estimate, E held fixed; the form
+printed in Marubini and Valsecchi 1995 and in the R package cifmodeling's formula vignette). The
+primary analysis uses `tte_aj` with `se_log_oe_dm`.
 
 ### Small cells
 
@@ -138,6 +166,8 @@ site stands. Details and sources:
 - Unit tests: hand-traced. They must pass before any commit to this repository.
 - Simulation study v1 and NHANES study v1: pre-registered, queued, **not run yet**. Results
   will be published here whatever they show.
+- Selection-calibration curve (0.2.3): an analytic result plus tested code; not yet fitted to
+  any real or simulated multi-site data.
 - OMOP code: tested only on invented records. It has **not** yet run on any OMOP database,
   synthetic or real. A smoke test on OHDSI's public synthetic Synthea27Nj set is queued.
 - Not done: any real health-system data; a container; expert review.
