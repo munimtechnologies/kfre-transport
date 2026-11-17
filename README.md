@@ -29,6 +29,28 @@ who gets a urine albumin (uACR) test?**
   risk by about 7% (Ravani et al., JASN 2019;30:2219-2227, PMID 31540963). A transportability
   study must therefore say which "observed risk" it compares the KFRE with.
 
+## New (2026-11-17): evidence map v1, the published studies cannot answer it yet
+
+The pre-registered evidence map
+([prereg](findings/evidence-map-prereg-v1-2026-11-17.md),
+[extraction and result](findings/evidence-map-extraction-v1-2026-11-17.md),
+[table](findings/evidence-map-extraction-v1-2026-11-17.csv)) searched Europe PMC three fixed
+ways (228, 476 and 120 hits) for real-world KFRE validations that report both the testing rate
+and observed-versus-predicted risk among those scored.
+
+- Only **2** of about 45 candidate validations report both, and neither cleanly. As
+  pre-registered (fewer than 5 studies), the analysis is **not estimable**: the predictions E1
+  and E2 were not tested, and this is not a null result.
+- Seven studies report the testing rate (11.7% to 88%) but no numeric calibration; several
+  report numeric calibration but no testing denominator.
+- Exploratory, not pre-registered: Stockholm's SCREAM data appear in two 2026 validations that
+  score different subsets. On one baseline (a hand rescaling under a stated assumption) their
+  5-year O/E differ by roughly 2 to 3 times (2.11 versus about 0.73-0.80). This is consistent
+  with "who gets scored changes apparent calibration", but the subsets differ in more than
+  testing, so it is not a test.
+- Consequence: the multi-site study must measure each site's testing rate itself, as `omop.py`
+  does, and nested testing windows inside one system are a cheap sharper design.
+
 ## New in 0.2.4: how many health systems a study needs
 
 `kfretransport/power.py` computes the power of a multi-site study to detect the selection
@@ -117,6 +139,9 @@ python -m kfretransport.power --theta 0.3 0.69 --site-variance 0.02 --tau2 0.05 
   group's KFRE under US testing rates than under non-selective testing.
 - [findings/power-design-2026-11-17.md](findings/power-design-2026-11-17.md): sample-size
   reasoning for the multi-site study (a design calculation, not a prediction).
+- [findings/evidence-map-prereg-v1-2026-11-17.md](findings/evidence-map-prereg-v1-2026-11-17.md)
+  and its [result](findings/evidence-map-extraction-v1-2026-11-17.md): published real-world
+  validations; not estimable (2 qualifying studies, fewer than the pre-registered 5).
 
 ### OMOP cohort definitions (pre-declared in `omop.py`)
 
@@ -193,6 +218,7 @@ site stands. Details and sources:
   any real or simulated multi-site data.
 - Power and sample size (0.2.4): analytic, with hand-computed values; the exact table and a
   larger Monte Carlo check are queued (`kfre-power-v1`).
+- Evidence map v1 (2026-11-17): done; not estimable from published studies (2 of the 5 needed).
 - OMOP code: tested only on invented records. It has **not** yet run on any OMOP database,
   synthetic or real. A smoke test on OHDSI's public synthetic Synthea27Nj set is queued.
 - Not done: any real health-system data; a container; expert review.
