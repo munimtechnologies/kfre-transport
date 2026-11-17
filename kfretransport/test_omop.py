@@ -4,6 +4,7 @@
 # everything through vocabulary codes. Expected values were worked out by hand;
 # the working is in the comments.
 import json
+import math
 import os
 import tempfile
 import unittest
@@ -105,6 +106,13 @@ FILES = {"CONCEPT.csv": CONCEPT, "concept_ancestor.csv": ANCESTOR, "person.csv":
          "procedure_occurrence.csv": PROCEDURE, "observation.csv": OBSERVATION,
          "death.csv": DEATH, "observation_period.csv": PERIOD}
 
+# Version 0.2.1: the same extract plus a uPCR concept and one uPCR result for
+# person 2 (untested): 0.5 mg/mg on 2019-09-01, 30 days before the index date.
+PCR_FILES = dict(FILES)
+PCR_FILES["CONCEPT.csv"] = CONCEPT + \
+    "1005,Protein/Creat Ur mass ratio,Measurement,LOINC,Lab Test,S,2890-2,1970-01-01,2099-12-31,\n"
+PCR_FILES["measurement.csv"] = MEASUREMENT + "26,2,1005,2019-09-01,0.5,0,mg/mg\n"
+
 
 def write_fixture(folder, files=FILES):
     for name, text in files.items():
@@ -166,6 +174,7 @@ class TestCohort(FixtureCase):
         # uACR: 2019-03-01 is 416 days before index (out of the 365-day window),
         # 2020-05-01 is after index; 2020-03-01: 30 mg/mmol * 8.84 = 265.2 mg/g.
         self.assertTrue(r["tested"])
+        self.assertEqual(r["uacr_source"], "acr")
         self.assertAlmostEqual(r["uacr_mg_g"], 265.2, places=9)
 
     def test_person1_outcome_found_through_descendant(self):
@@ -193,6 +202,7 @@ class TestCohort(FixtureCase):
         self.assertFalse(r["male"])
         self.assertAlmostEqual(r["egfr"], egfr_ckdepi_2021(1.5, 59, female=True), places=9)
         self.assertFalse(r["tested"])
+        self.assertIsNone(r["uacr_source"])
         self.assertIsNone(r["kfre2"])
         # Z99.2 found only through condition_source_concept_id (standard id is 0).
         # 2019-10-01 -> 2022-01-01 = 92 + 366 + 365 = 823 days; death came later.
@@ -224,6 +234,8 @@ class TestCohort(FixtureCase):
                         "missing CPT4 1012740", "missing ICD10CM Z94.0"):
             self.assertIn(missing, notes)
         self.assertFalse([n for n in notes if "2160-0" in n or "Z99.2" in n])
+        # uPCR is looked up only when the conversion is switched on
+        self.assertFalse([n for n in notes if "2890-2" in n])
 
     def test_site_summary(self):
         s2 = site_summary(self.cohort["rows"], 2)
@@ -231,12 +243,90 @@ class TestCohort(FixtureCase):
         self.assertEqual((s2["n_cohort"], s2["n_tested"], s2["n_scored"], s2["events_scored"]),
                          (4, 3, 2, 1))
         self.assertAlmostEqual(s2["testing_rate"], 0.75, places=12)
+        self.assertEqual(s2["n_pcr_converted"], 0)
         exp = self.by_id[1]["kfre2"] + self.by_id[6]["kfre2"]
         self.assertAlmostEqual(s2["expected_scored"], exp, places=12)
         self.assertAlmostEqual(s2["oe"], 1.0 / exp, places=12)
         self.assertEqual((s2["n_untested_with_outcome"], s2["events_untested"]), (1, 0))
         s5 = site_summary(self.cohort["rows"], 5)
         self.assertEqual((s5["n_untested_with_outcome"], s5["events_untested"]), (1, 1))
+
+    def test_site_summary_time_to_event(self):
+        # Everyone with a prediction (1, 6, 7), including 7 who was censored early:
+        # 7 censored day 245 (3 -> 2 at risk); 6 dies day 365 (S = 1/2);
+        # 1 starts dialysis day 407 with 1 at risk: CIF = 1/2 * 1/1 = 0.5.
+        # Death censored instead (Kaplan-Meier): risk = 1/1 = 1.0.
+        k = [self.by_id[i]["kfre2"] for i in (1, 6, 7)]
+        mean2 = sum(k) / 3.0
+        s2 = site_summary(self.cohort["rows"], 2)
+        aj, km = s2["tte_aj"], s2["tte_km"]
+        self.assertEqual((aj["n"], aj["events"]), (3, 1))
+        self.assertAlmostEqual(aj["observed_risk"], 0.5, places=12)
+        self.assertAlmostEqual(aj["expected_risk"], mean2, places=12)
+        self.assertAlmostEqual(aj["oe"], 0.5 / mean2, places=12)
+        self.assertAlmostEqual(aj["se_log_oe"], 1.0, places=12)
+        self.assertAlmostEqual(km["observed_risk"], 1.0, places=12)
+        self.assertAlmostEqual(km["oe"], 1.0 / mean2, places=12)
+        # all times are before 5 years, so the 5-year observed risks are the same
+        s5 = site_summary(self.cohort["rows"], 5)
+        self.assertAlmostEqual(s5["tte_aj"]["observed_risk"], 0.5, places=12)
+        self.assertAlmostEqual(s5["tte_km"]["observed_risk"], 1.0, places=12)
+
+    def test_site_summary_without_predictions(self):
+        rows = [dict(self.by_id[2])]
+        s2 = site_summary(rows, 2)
+        self.assertIsNone(s2["oe"])
+        self.assertIsNone(s2["tte_aj"])
+        self.assertIsNone(s2["tte_km"])
+
+
+class TestPcrConversion(unittest.TestCase):
+    def build(self, pcr_conversion):
+        with tempfile.TemporaryDirectory() as d:
+            write_fixture(d, PCR_FILES)
+            return build_cohort(read_cdm(d), pcr_conversion=pcr_conversion)
+
+    def test_off_by_default(self):
+        cohort = self.build(False)
+        r2 = {r["person_id"]: r for r in cohort["rows"]}[2]
+        self.assertIsNone(r2["uacr_source"])
+        self.assertIsNone(r2["kfre2"])
+        self.assertNotIn("upcr_unit_from_text", cohort["counts"])
+
+    def test_converts_untested_person(self):
+        cohort = self.build(True)
+        by_id = {r["person_id"]: r for r in cohort["rows"]}
+        r2 = by_id[2]
+        # 0.5 mg/mg * 1000 = 500 mg/g -> every spline term is 0 -> exp(5.392)
+        self.assertEqual(r2["uacr_source"], "pcr")
+        self.assertFalse(r2["tested"])
+        self.assertAlmostEqual(r2["uacr_mg_g"], math.exp(5.392), places=9)
+        self.assertAlmostEqual(r2["kfre2"], kfre4(59, False, r2["egfr"], math.exp(5.392), years=2),
+                               places=12)
+        # measured uACR still wins for person 1 (no uPCR anyway) and is unchanged
+        self.assertEqual(by_id[1]["uacr_source"], "acr")
+        self.assertAlmostEqual(by_id[1]["uacr_mg_g"], 265.2, places=9)
+        self.assertEqual(cohort["counts"]["upcr_unit_from_text"], 1)
+        self.assertNotIn("upcr_below_50_converted", cohort["counts"])
+        self.assertFalse([n for n in cohort["notes"] if "2890-2" in n])
+
+    def test_summary_with_conversion(self):
+        rows = self.build(True)["rows"]
+        s2 = site_summary(rows, 2)
+        # testing rate still counts measured uACR only: 3 of 4
+        self.assertAlmostEqual(s2["testing_rate"], 0.75, places=12)
+        self.assertEqual(s2["n_pcr_converted"], 1)
+        # scored at 2 y: 1 (y=1), 2 (y=0: dialysis on day 823), 6 (y=0)
+        self.assertEqual((s2["n_scored"], s2["events_scored"]), (3, 1))
+        self.assertEqual((s2["n_untested_with_outcome"], s2["events_untested"]), (0, 0))
+        # time to event, 4 people: 7 censored 245 (4 -> 3); 6 dies 365 (S = 2/3);
+        # 1 dialysis 407, 2 at risk: CIF = 2/3 * 1/2 = 1/3; 2 dialysis 823 > 730.
+        self.assertAlmostEqual(s2["tte_aj"]["observed_risk"], 1.0 / 3.0, places=12)
+        self.assertEqual(s2["tte_aj"]["events"], 1)
+        # 5 y: S after 407 = 2/3 * 1/2 = 1/3; day 823, 1 at risk: CIF += 1/3 -> 2/3
+        s5 = site_summary(rows, 5)
+        self.assertAlmostEqual(s5["tte_aj"]["observed_risk"], 2.0 / 3.0, places=12)
+        self.assertEqual(s5["tte_aj"]["events"], 2)
 
 
 class TestVocabularyDrift(unittest.TestCase):
@@ -289,6 +379,18 @@ class TestCli(unittest.TestCase):
         self.assertNotIn("person_id", text)
         self.assertEqual([s["years"] for s in data["summary"]], [2, 5])
         self.assertEqual(data["excluded"]["krt_on_or_before_index"], 1)
+        self.assertFalse(data["pcr_conversion"])
+        self.assertAlmostEqual(data["summary"][0]["tte_aj"]["observed_risk"], 0.5, places=12)
+
+    def test_cli_pcr_conversion(self):
+        with tempfile.TemporaryDirectory() as d:
+            write_fixture(d, PCR_FILES)
+            out = os.path.join(d, "out.json")
+            main(["--cdm-dir", d, "--out", out, "--pcr-conversion"])
+            with open(out, encoding="utf-8") as f:
+                data = json.load(f)
+        self.assertTrue(data["pcr_conversion"])
+        self.assertEqual(data["summary"][0]["n_pcr_converted"], 1)
 
 
 if __name__ == "__main__":

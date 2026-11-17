@@ -28,8 +28,10 @@ UACR = [
     ("LOINC", "32294-1", False, "Albumin/Creatinine [Ratio] in Urine"),
 ]
 
-# Kept for the pre-declared conversion strategy (not used by the cohort yet).
+# Urine protein-to-creatinine ratio: used only by the pre-declared sensitivity
+# analysis that converts PCR to an estimated ACR (albuminuria.py, 0.2.1).
 UPCR = [("LOINC", "2890-2", False, "Protein/Creatinine [Mass Ratio] in Urine")]
+# Dipstick protein: kept for reference; no conversion is implemented.
 URINE_PROTEIN_DIPSTICK = [("LOINC", "5804-0", False, "Protein [Mass/volume] in Urine by Test strip")]
 
 # Kidney failure, as the KFRE defines it: start of kidney replacement therapy
@@ -84,7 +86,7 @@ VOCABULARY_WATCH = [
 
 # Units, keyed by the UCUM code (OMOP stores UCUM codes as the concept_code of
 # the unit concept) or by the raw unit text, compared lower-case without spaces.
-# Factor converts the value to mg/dL (creatinine) or mg/g (uACR).
+# Factor converts the value to mg/dL (creatinine) or mg/g (uACR, uPCR).
 CREATININE_UNITS = {
     "mg/dl": 1.0,
     "umol/l": 1.0 / 88.4,
@@ -102,10 +104,14 @@ UACR_UNITS = {
     "mg/mg": 1000.0,
     "mg/mg{creat}": 1000.0,
 }
+# uPCR is often reported in mg/mg (for example 0.2) or g/g in the US.
+UPCR_UNITS = dict(UACR_UNITS)
+UPCR_UNITS.update({"g/g": 1000.0, "g/g{creat}": 1000.0})
 
 # Plausible ranges after conversion; values outside are dropped and counted.
 CREATININE_RANGE_MG_DL = (0.2, 20.0)
 UACR_RANGE_MG_G = (0.0, 50000.0)   # lower bound exclusive (the KFRE takes ln uACR)
+UPCR_RANGE_MG_G = (0.0, 100000.0)  # lower bound exclusive (the conversion takes logs)
 
 # OMOP's fixed gender concepts.
 GENDER_MALE = 8507

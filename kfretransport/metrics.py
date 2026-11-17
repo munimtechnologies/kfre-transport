@@ -4,6 +4,9 @@
 - observed/expected ratio, Brier score, C-statistic (binary outcome, ties 1/2)
 - logistic calibration slope and intercept (Newton-Raphson) and
   calibration-in-the-large (intercept with logit(p) as offset)
+- time-to-event observed risk by a horizon: Aalen-Johansen cumulative incidence
+  (other causes compete) and 1 - Kaplan-Meier (other causes censored), and the
+  O/E ratio built on either (new in 0.2.1)
 - DerSimonian-Laird random-effects pooling with I^2 and the Higgins-Thompson-
   Spiegelhalter (2009) 95% prediction interval for a NEW site (t, k-2 df)
 - random-effects meta-regression on one site-level moderator: method-of-moments
@@ -132,6 +135,75 @@ def calibration_in_the_large(y, p, max_iter=100, tol=1e-12):
     return a, math.sqrt(1.0 / h)
 
 
+# ------------------------------------------------------------ time to event
+def cumulative_incidence(times, events, horizon, cause=1):
+    """Aalen-Johansen cumulative incidence of `cause` by time `horizon`.
+
+    events: 0 = censored, any other value = an event of that type; every
+    non-zero type other than `cause` is a competing event. Someone censored at
+    time t is still at risk at t (events before censorings at tied times).
+    Returns (cumulative incidence, number of `cause` events at or before the
+    horizon)."""
+    data = sorted(zip(times, events))
+    if not data:
+        raise ValueError("empty")
+    at_risk = len(data)
+    surv = 1.0          # all-cause event-free probability just before t
+    cif = 0.0
+    n_cause = 0
+    i = 0
+    while i < len(data):
+        t = data[i][0]
+        if t > horizon:
+            break
+        j = i
+        d_cause = d_any = 0
+        while j < len(data) and data[j][0] == t:
+            e = data[j][1]
+            if e == cause:
+                d_cause += 1
+            if e != 0:
+                d_any += 1
+            j += 1
+        if d_any:
+            cif += surv * d_cause / at_risk
+            surv *= 1.0 - d_any / at_risk
+        n_cause += d_cause
+        at_risk -= j - i
+        i = j
+    return cif, n_cause
+
+
+def km_risk(times, events, horizon, cause=1):
+    """1 - Kaplan-Meier survival from `cause` by `horizon`, every other event
+    type treated as censoring. Larger than the Aalen-Johansen cumulative
+    incidence whenever a competing event happens before a `cause` event.
+    Returns (risk, number of `cause` events at or before the horizon)."""
+    return cumulative_incidence(times, [1 if e == cause else 0 for e in events],
+                                horizon, cause=1)
+
+
+def oe_time_to_event(times, events, p, horizon, cause=1, competing=True):
+    """O/E by a horizon for everyone with a prediction, including people whose
+    follow-up ended early. O = Aalen-Johansen cumulative incidence (competing=True)
+    or 1 - Kaplan-Meier (competing=False); E = mean predicted risk.
+    se_log_oe = 1/sqrt(events), a Poisson approximation (None with 0 events).
+    Returns a dict."""
+    if not p or len(p) != len(times) or len(times) != len(events):
+        raise ValueError("need matching, non-empty times, events and predictions")
+    if competing:
+        risk, n_ev = cumulative_incidence(times, events, horizon, cause)
+    else:
+        risk, n_ev = km_risk(times, events, horizon, cause)
+    expected = sum(p) / len(p)
+    if expected <= 0:
+        raise ValueError("mean predicted risk must be > 0")
+    return {"n": len(p), "events": n_ev, "observed_risk": risk, "expected_risk": expected,
+            "oe": risk / expected,
+            "se_log_oe": (1.0 / math.sqrt(n_ev)) if n_ev > 0 else None}
+
+
+# ------------------------------------------------------------ pooling
 def dersimonian_laird(estimates, variances):
     """Random-effects pooling. Returns a dict with pooled, se, tau2, q, i2,
     ci (95%, normal) and pi (95% prediction interval for a new site, t with

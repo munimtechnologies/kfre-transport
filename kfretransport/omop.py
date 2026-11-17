@@ -22,6 +22,18 @@ Pre-declared definitions (version 0.2.0; changes need a dated note):
   followed through the horizon without KRT or if death came first; None (left
   out) if follow-up ended earlier without either.
 
+Dated note, 2026-11-17 (version 0.2.1; the definitions above are unchanged):
+- site_summary also reports time-to-event O/E for EVERYONE with a prediction,
+  including people whose follow-up ended before the horizon: observed risk by
+  Aalen-Johansen cumulative incidence of KRT with death competing ("tte_aj"),
+  and by 1 - Kaplan-Meier with death censored ("tte_km"). The complete-case
+  O/E ("oe") is kept for comparison.
+- Optional sensitivity analysis (pcr_conversion=True, CLI --pcr-conversion):
+  people with no uACR in the window but a urine protein-to-creatinine ratio
+  (LOINC 2890-2) in the same window get an estimated uACR from the Sumida 2020
+  crude equation (albuminuria.py) and a KFRE prediction. 'tested' still means
+  a MEASURED uACR, so the testing rate is unchanged. Off by default.
+
 Research code only. Information only, not medical advice, not a medical device.
 """
 import argparse
@@ -32,8 +44,9 @@ import json
 import os
 
 from kfretransport import conceptsets as cs
+from kfretransport.albuminuria import LOW_PCR_MG_G, acr_from_pcr
 from kfretransport.equations import egfr_ckdepi_2021, kfre4
-from kfretransport.metrics import observed_expected
+from kfretransport.metrics import observed_expected, oe_time_to_event
 
 HORIZON_DAYS = {2: 730, 5: 1826}
 TABLES = ("person", "measurement", "condition_occurrence", "procedure_occurrence",
@@ -196,8 +209,8 @@ def _lab_series(rows, ids, units, value_range, vocab, counts, label):
         if used_text:
             counts[label + "_unit_from_text"] = counts.get(label + "_unit_from_text", 0) + 1
         v = value * factor
-        if label == "uacr":
-            plausible = lo < v <= hi     # uACR must be > 0 (the KFRE takes its log)
+        if label in ("uacr", "upcr"):
+            plausible = lo < v <= hi     # must be > 0 (logs are taken)
         else:
             plausible = lo <= v <= hi
         if not plausible:
@@ -205,6 +218,15 @@ def _lab_series(rows, ids, units, value_range, vocab, counts, label):
             continue
         out.setdefault(pid, {}).setdefault(day, []).append(v)
     return out
+
+
+def _latest_in_window(series, index, lookback_days):
+    """Mean of the same-day values on the latest date in [index - lookback, index]."""
+    window = [d for d in series if 0 <= (index - d).days <= lookback_days]
+    if not window:
+        return None
+    last = max(window)
+    return sum(series[last]) / len(series[last])
 
 
 def _events(cdm, std_ids, src_ids):
@@ -236,7 +258,7 @@ def _events(cdm, std_ids, src_ids):
 
 # ---------------------------------------------------------------- cohort
 def build_cohort(cdm, region="north_america", egfr_range=(10.0, 60.0), confirm_days=90,
-                 acr_lookback_days=365):
+                 acr_lookback_days=365, pcr_conversion=False):
     """Returns {"rows": [...], "excluded": {...}, "counts": {...}, "notes": [...]}."""
     vocab = Vocabulary(cdm.get("concept", []), cdm.get("concept_ancestor", []))
     notes = []
@@ -254,6 +276,12 @@ def build_cohort(cdm, region="north_america", egfr_range=(10.0, 60.0), confirm_d
                         cs.CREATININE_RANGE_MG_DL, vocab, counts, "creatinine")
     acr = _lab_series(cdm.get("measurement", []), acr_ids, cs.UACR_UNITS,
                       cs.UACR_RANGE_MG_G, vocab, counts, "uacr")
+    pcr = {}
+    if pcr_conversion:
+        pcr_ids, n = resolve(vocab, cs.UPCR)
+        notes += n
+        pcr = _lab_series(cdm.get("measurement", []), pcr_ids, cs.UPCR_UNITS,
+                          cs.UPCR_RANGE_MG_G, vocab, counts, "upcr")
     krt = _events(cdm, krt_std, krt_src)
     deaths = {}
     for r in cdm.get("death", []):
@@ -314,11 +342,14 @@ def build_cohort(cdm, region="north_america", egfr_range=(10.0, 60.0), confirm_d
             drop("index_outside_observation_period")
             continue
         end = max(b for _, b in period)
-        acr_value = None
-        window = [d for d in acr.get(pid, {}) if 0 <= (index - d).days <= acr_lookback_days]
-        if window:
-            last = max(window)
-            acr_value = sum(acr[pid][last]) / len(acr[pid][last])
+        acr_value = _latest_in_window(acr.get(pid, {}), index, acr_lookback_days)
+        source = "acr" if acr_value is not None else None
+        if acr_value is None and pcr_conversion:
+            pcr_value = _latest_in_window(pcr.get(pid, {}), index, acr_lookback_days)
+            if pcr_value is not None:
+                if pcr_value < LOW_PCR_MG_G:
+                    counts["upcr_below_50_converted"] = counts.get("upcr_below_50_converted", 0) + 1
+                acr_value, source = acr_from_pcr(pcr_value), "pcr"
         after = [(d, path) for d, path in events if d > index]
         kf = after[0] if after else None
         death = deaths.get(pid)
@@ -330,7 +361,8 @@ def build_cohort(cdm, region="north_america", egfr_range=(10.0, 60.0), confirm_d
             event, stop, path = 0, end, ""
         age = age_on(birth, index)
         row = {"person_id": pid, "index_date": index.isoformat(), "age": age, "male": male,
-               "egfr": index_egfr, "tested": acr_value is not None, "uacr_mg_g": acr_value,
+               "egfr": index_egfr, "tested": source == "acr", "uacr_mg_g": acr_value,
+               "uacr_source": source,
                "event": event, "time_days": (stop - index).days, "outcome_path": path}
         for years, h in HORIZON_DAYS.items():
             if event == 1 and row["time_days"] <= h:
@@ -347,19 +379,32 @@ def build_cohort(cdm, region="north_america", egfr_range=(10.0, 60.0), confirm_d
 
 
 def site_summary(rows, years):
-    """Testing rate, and O/E of the KFRE among tested people with a horizon outcome."""
+    """Testing rate; complete-case O/E of the KFRE among people with a prediction
+    and a horizon outcome; and time-to-event O/E (Aalen-Johansen with death
+    competing, and 1 - Kaplan-Meier with death censored) among everyone with a
+    prediction."""
     y_key, p_key = "y%d" % years, "kfre%d" % years
     tested = [r for r in rows if r["tested"]]
-    scored = [r for r in tested if r[y_key] is not None]
-    untested = [r for r in rows if not r["tested"] and r[y_key] is not None]
+    predicted = [r for r in rows if r[p_key] is not None]
+    scored = [r for r in predicted if r[y_key] is not None]
+    untested = [r for r in rows if r[p_key] is None and r[y_key] is not None]
     out = {"years": years, "n_cohort": len(rows), "n_tested": len(tested),
            "testing_rate": (len(tested) / len(rows)) if rows else None,
+           "n_pcr_converted": sum(1 for r in predicted if r.get("uacr_source") == "pcr"),
            "n_scored": len(scored), "events_scored": sum(r[y_key] for r in scored),
            "expected_scored": sum(r[p_key] for r in scored),
            "n_untested_with_outcome": len(untested),
            "events_untested": sum(r[y_key] for r in untested)}
     out["oe"] = (observed_expected([r[y_key] for r in scored], [r[p_key] for r in scored])
                  if scored else None)
+    out["tte_aj"] = out["tte_km"] = None
+    if predicted:
+        times = [r["time_days"] for r in predicted]
+        events = [r["event"] for r in predicted]
+        p = [r[p_key] for r in predicted]
+        h = HORIZON_DAYS[years]
+        out["tte_aj"] = oe_time_to_event(times, events, p, h, cause=1, competing=True)
+        out["tte_km"] = oe_time_to_event(times, events, p, h, cause=1, competing=False)
     return out
 
 
@@ -397,11 +442,13 @@ def main(argv=None):
     ap.add_argument("--out", required=True, help="JSON file to write (summary only)")
     ap.add_argument("--region", default="north_america",
                     choices=["north_america", "non_north_america"])
+    ap.add_argument("--pcr-conversion", action="store_true",
+                    help="sensitivity analysis: estimate uACR from uPCR when no uACR")
     a = ap.parse_args(argv)
     cdm = read_cdm(a.cdm_dir)
-    cohort = build_cohort(cdm, region=a.region)
+    cohort = build_cohort(cdm, region=a.region, pcr_conversion=a.pcr_conversion)
     result = {"excluded": cohort["excluded"], "counts": cohort["counts"],
-              "concept_notes": cohort["notes"],
+              "concept_notes": cohort["notes"], "pcr_conversion": a.pcr_conversion,
               "summary": [site_summary(cohort["rows"], y) for y in (2, 5)],
               "vocabulary_drift": vocabulary_drift(cdm)}
     with open(a.out, "w", encoding="utf-8") as f:

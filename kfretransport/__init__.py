@@ -7,4 +7,4 @@ Research code only. Information only, not medical advice, not a medical device.
 Made with AI agents (Claude) working in MV2's name (MV2, Munim, Inc.).
 """
 
-CODE_VERSION = "0.2.0"
+CODE_VERSION = "0.2.1"

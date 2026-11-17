@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kfretransport"
-version = "0.2.0"
-description = "Open, tested KFRE/eGFR equations, calibration metrics, an OMOP CDM cohort builder and a pre-registered simulation of informative uACR testing across health systems (research only, not medical advice)"
+version = "0.2.1"
+description = "Open, tested KFRE/eGFR equations, calibration metrics (including competing-risk O/E), an OMOP CDM cohort builder and a pre-registered simulation of informative uACR testing across health systems (research only, not medical advice)"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.9"

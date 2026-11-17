@@ -21,16 +21,21 @@ who gets a urine albumin (uACR) test?**
   two test different people. Complete-case analysis hides this. NIH NCATS's Real-World Evidence
   Innovation Challenge names kidney disease as a priority area and asks for methods whose
   reproducibility, transportability and stability can be measured across health systems.
+- Death competes with kidney failure. In 30,801 Alberta adults with stage 4 CKD more people died
+  than reached kidney failure, and treating death as censoring overstated 5-year kidney-failure
+  risk by about 7% (Ravani et al., JASN 2019;30:2219-2227, PMID 31540963). A transportability
+  study must therefore say which "observed risk" it compares the KFRE with.
 
-## What is here (version 0.2.0)
+## What is here (version 0.2.1)
 
 | Module | What it does | Checked by |
 |---|---|---|
 | `kfretransport/equations.py` | CKD-EPI 2021 (race-free) and 2009 creatinine eGFR; 4-variable KFRE (2- and 5-year; North American and non-North American baselines); KDIGO G and A categories; unit conversions | hand-worked unit tests (`test_equations.py`) |
-| `kfretransport/metrics.py` | O/E, Brier, C-statistic, logistic calibration slope/intercept and calibration-in-the-large, DerSimonian-Laird pooling with I^2 and a 95% prediction interval for a new site, random-effects meta-regression with Knapp-Hartung inference | hand-worked unit tests (`test_metrics.py`) |
+| `kfretransport/metrics.py` | O/E, Brier, C-statistic, logistic calibration slope/intercept and calibration-in-the-large, DerSimonian-Laird pooling with I^2 and a 95% prediction interval for a new site, random-effects meta-regression with Knapp-Hartung inference; **new in 0.2.1:** Aalen-Johansen cumulative incidence (death competing), 1 - Kaplan-Meier (death censored), and a time-to-event O/E on either | hand-worked unit tests (`test_metrics.py`) |
+| `kfretransport/albuminuria.py` (new) | estimated uACR from a urine protein-to-creatinine ratio (Sumida et al. 2020 crude equation), for a sensitivity analysis only | tests that it reproduces five figures the paper reports (`test_albuminuria.py`); see provenance note below |
 | `kfretransport/sim.py` | synthetic multi-site study of informative uACR testing (4 scenarios) | property tests (`test_sim.py`); the full study is pre-registered and queued, **not run yet** |
-| `kfretransport/conceptsets.py` (new) | concept sets written as LOINC / SNOMED / ICD10CM / UCUM **codes**, not OMOP ids; unit table; plausible ranges | each code checked on 2026-11-16 against tx.fhir.org (LOINC 2.83, SNOMED CT International 2026-07-01, ICD-10-CM 2026-04-01) |
-| `kfretransport/omop.py` (new) | reads an OMOP CDM v5.4 extract (CSV or Athena-style TSV), resolves the concept sets through the site's own vocabulary, builds the KFRE cohort and outcome, writes a site summary with no person-level rows, and reports vocabulary drift | hand-traced tests on an invented 7-person extract (`test_omop.py`) |
+| `kfretransport/conceptsets.py` | concept sets written as LOINC / SNOMED / ICD10CM / UCUM **codes**, not OMOP ids; unit tables (now also uPCR); plausible ranges | each code checked on 2026-11-16 against tx.fhir.org (LOINC 2.83, SNOMED CT International 2026-07-01, ICD-10-CM 2026-04-01) |
+| `kfretransport/omop.py` | reads an OMOP CDM v5.4 extract (CSV or Athena-style TSV), resolves the concept sets through the site's own vocabulary, builds the KFRE cohort and outcome, writes a site summary with no person-level rows (now with complete-case, Aalen-Johansen and Kaplan-Meier O/E side by side), and reports vocabulary drift | hand-traced tests on an invented 7-person extract (`test_omop.py`) |
 
 Python 3.9+, standard library only, no network.
 
@@ -38,6 +43,7 @@ Python 3.9+, standard library only, no network.
 python -m unittest discover -v
 python -m kfretransport.sim --k 200 --n 10000 --seed 20261116 --out-dir out
 python -m kfretransport.omop --cdm-dir path/to/omop_csv --out site-summary.json
+python -m kfretransport.omop --cdm-dir path/to/omop_csv --out site-summary-pcr.json --pcr-conversion
 ```
 
 ### OMOP cohort definitions (pre-declared in `omop.py`)
@@ -53,6 +59,42 @@ python -m kfretransport.omop --cdm-dir path/to/omop_csv --out site-summary.json
   dependence, transplant status), matched on standard **or** source concepts (ICD10CM Z99.2,
   Z94.0). Death first is a competing event. Follow-up ends at the end of the observation period.
 - The output has counts and rates only, never person-level rows.
+
+### Three ways to count "observed" (new in 0.2.1)
+
+`site_summary()` now reports, for each horizon (2 and 5 years):
+
+| Key | Who is counted | Observed risk |
+|---|---|---|
+| `oe` | people with a prediction **and** a known horizon outcome (complete case) | share with KRT by the horizon (death first counts as no KRT); people censored earlier are left out |
+| `tte_aj` | **everyone** with a prediction | Aalen-Johansen cumulative incidence of KRT, death competing |
+| `tte_km` | **everyone** with a prediction | 1 - Kaplan-Meier, death treated as censoring |
+
+The expected risk is the mean KFRE prediction of the same people. `se_log_oe` is the Poisson
+approximation 1/sqrt(events), used as the site's variance input to pooling and meta-regression.
+Leaving out people censored early (complete case) over-weights people who had their outcome early,
+and treating death as censoring (Kaplan-Meier) estimates the risk in a world where nobody dies.
+In the test extract the three disagree: KM gives 1.0 and Aalen-Johansen gives 0.5 for the same
+three people. The pre-declared primary measure for the multi-site analysis will be `tte_aj`,
+fixed in a dated protocol note before any real data are read.
+
+### uPCR to uACR conversion (sensitivity analysis only, off by default)
+
+With `--pcr-conversion`, people with no uACR in the window but a urine protein-to-creatinine
+ratio (LOINC 2890-2) get an estimated uACR from the crude equation of Sumida et al., Ann Intern
+Med 2020;173:426-435 (PMID 32658569; 919,383 adults, CKD Prognosis Consortium):
+
+    ACR = exp(5.3920 + 0.3072 ln(min(PCR/50, 1)) + 1.5793 ln(max(min(PCR/500, 1), 0.1)) + 1.1266 ln(max(PCR/500, 1)))
+
+with PCR and ACR in mg/g. "Tested" still means a **measured** uACR, so the testing rate does not
+change. Provenance, stated plainly: the agents could not open the paper's PDF. They took the
+coefficients from a search-engine extract of the paper's Table 2. They then checked that the
+equation reproduces five figures reported for the crude model (PCR 150 -> ACR 33, PCR 500 -> 220,
+ACR 30 <-> PCR 142, ACR 300 <-> PCR 660, and 2.99-fold per doubling of PCR between 50 and 500).
+The slope below PCR 50 mg/g is not checked by any reported figure, and the paper says the
+association is inconsistent there. The adjusted equation and the dipstick conversion are not
+implemented. Please check against the paper before any use, and open an issue if anything
+differs.
 
 ## Vocabulary drift: SNOMED retired "End-stage renal disease" in June 2026
 
@@ -72,9 +114,10 @@ site stands. Details and sources:
   predictions (S1-S7) written before any run. The results will be published here whatever
   they show.
 - OMOP code: tested only on invented records. It has **not** yet run on any OMOP database,
-  synthetic or real.
-- Not done: any real data, censoring-aware estimators (for example, Aalen-Johansen), small-cell
-  suppression rules for a given data enclave, a container, and expert review.
+  synthetic or real. A smoke test of 0.2.0 on OHDSI's public synthetic Synthea27Nj set is queued.
+- Not done: any real data; a variance estimator for the Aalen-Johansen O/E better than the
+  Poisson approximation; small-cell suppression rules for a given data enclave; a container;
+  expert review.
 
 ## Formulas and their sources
 
