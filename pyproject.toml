@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kfretransport"
-version = "0.2.4"
-description = "Open, tested KFRE/eGFR equations, calibration metrics (including competing-risk O/E with a delta-method variance), multi-site pooling with small-cell masking, a closed-form selection-calibration curve with multi-site power calculations, an OMOP CDM cohort builder, a pre-registered simulation and a pre-registered NHANES study of informative uACR testing (research only, not medical advice)"
+version = "0.2.5"
+description = "Open, tested KFRE/eGFR equations, calibration metrics (including competing-risk O/E with a delta-method variance), multi-site pooling with small-cell masking, a closed-form selection-calibration curve with multi-site power calculations, a within-site nested-window design, an OMOP CDM cohort builder, a pre-registered simulation and a pre-registered NHANES study of informative uACR testing (research only, not medical advice)"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.9"
@@ -20,6 +20,7 @@ kfre-pool = "kfretransport.pool:main"
 kfre-nhanes = "kfretransport.nhanes:main"
 kfre-selection = "kfretransport.selection:main"
 kfre-power = "kfretransport.power:main"
+kfre-nested = "kfretransport.nested:main"
 
 [tool.setuptools]
 packages = ["kfretransport"]

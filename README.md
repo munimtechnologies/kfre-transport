@@ -29,7 +29,37 @@ who gets a urine albumin (uACR) test?**
   risk by about 7% (Ravani et al., JASN 2019;30:2219-2227, PMID 31540963). A transportability
   study must therefore say which "observed risk" it compares the KFRE with.
 
-## New (2026-11-17): evidence map v1, the published studies cannot answer it yet
+## New in 0.2.5 (2026-11-18): a test that works inside one health system
+
+Comparing health systems mixes testing practice with everything else that differs between them.
+`kfretransport/nested.py` tests the selection curve **inside one system**. It keeps the cohort,
+equation, baseline and estimator fixed and changes only the uACR lookback window (90, 180 and
+365 days). It then scores disjoint recency bands (latest uACR 0-90, 91-180 and 181-365 days
+before index). Design note:
+[findings/nested-window-design-2026-11-18.md](findings/nested-window-design-2026-11-18.md);
+pre-registration:
+[findings/protocol-addendum-3-2026-11-18.md](findings/protocol-addendum-3-2026-11-18.md).
+
+- Under the threshold model of the selection curve, band j's O/E relative to the whole cohort is
+  [Phi(z_j + theta) - Phi(z_(j-1) + theta)] / (P_j - P_(j-1)), where P_j is the cumulative testing
+  rate. theta is the same as in the cross-site curve, and each site keeps its own intercept, so
+  between-site differences cancel.
+- The bands hold different people, so their estimates are independent (no covariance term).
+- Hand-computed illustration (the inputs are assumptions, not data): a system whose testing
+  rates are 15%, 30% and 40% at the three windows, with 180 kidney-failure events among the
+  tested, estimates theta with a standard error of about 0.16. About 73 events give 80% power at
+  theta = 0.69, and about 386 at theta = 0.3. The cross-site design with tau^2 = 0.05 needs
+  roughly 650 and 2,900 events (13 and 58 sites).
+- The shape of the gradient across bands says how a system tests. With a testing threshold, the
+  bias in the tested group keeps growing as fewer people are tested. With testing at a rate
+  tied to risk (a Poisson recency model, `nested.poisson_band_factors`), the bias tends to a
+  finite limit, exp(g kappa), for very recent tests.
+- Prediction N1 (pre-registered): theta > 0 within systems, with a 95% interval excluding 0. N3
+  checks that the within-system theta agrees with the cross-site theta.
+- `kfre-nested --cdm-dir ... --out ...` writes per-band summaries with small cells masked. It has
+  **not** been run on any real or synthetic database yet.
+
+## Evidence map v1 (2026-11-17): the published studies cannot answer it yet
 
 The pre-registered evidence map
 ([prereg](findings/evidence-map-prereg-v1-2026-11-17.md),
@@ -49,9 +79,9 @@ and observed-versus-predicted risk among those scored.
   with "who gets scored changes apparent calibration", but the subsets differ in more than
   testing, so it is not a test.
 - Consequence: the multi-site study must measure each site's testing rate itself, as `omop.py`
-  does, and nested testing windows inside one system are a cheap sharper design.
+  does. The nested-window design (0.2.5) is the sharper single-system test.
 
-## New in 0.2.4: how many health systems a study needs
+## 0.2.4: how many health systems a study needs
 
 `kfretransport/power.py` computes the power of a multi-site study to detect the selection
 effect, and the number of sites it needs. Findings note:
@@ -70,7 +100,7 @@ effect, and the number of sites it needs. Findings note:
   over that spread. In every design the linear test is never more powerful than the curve test
   (Cauchy-Schwarz), and the tests check this.
 
-## New in 0.2.3: a closed-form selection-calibration curve
+## 0.2.3: a closed-form selection-calibration curve
 
 If the part of kidney-failure risk that the KFRE's predictors miss is correlated with who gets
 tested, then among the tested
@@ -93,7 +123,7 @@ pre-specified secondary analysis
 ([findings/protocol-addendum-2-2026-11-17.md](findings/protocol-addendum-2-2026-11-17.md)).
 It has **not** been run on any real data.
 
-## What is here (version 0.2.4)
+## What is here (version 0.2.5)
 
 | Module | What it does | Checked by |
 |---|---|---|
@@ -101,7 +131,8 @@ It has **not** been run on any real data.
 | `kfretransport/metrics.py` | O/E, Brier, C-statistic, logistic calibration slope/intercept and calibration-in-the-large, DerSimonian-Laird pooling with I^2 and a 95% prediction interval for a new site, random-effects meta-regression with Knapp-Hartung inference, Aalen-Johansen cumulative incidence (death competing), 1 - Kaplan-Meier (death censored), time-to-event O/E; delta-method (Greenwood-type) variance of the Aalen-Johansen estimate and `se_log_oe_dm` | hand-worked unit tests (`test_metrics.py`), including checks that the variance equals the multinomial variance without censoring and Greenwood's variance without competing events |
 | `kfretransport/pool.py` | pools site summaries from `omop.py` into the pre-declared primary and secondary analyses (random-effects O/E and meta-regression on the site's testing rate) and masks small cells in published per-site rows | hand-worked unit tests (`test_pool.py`) |
 | `kfretransport/selection.py` | the selection-calibration curve for tested and untested people, theta from one site's O/E, its exact risk-scale version by quadrature, and a multi-site fit of theta with a profile-likelihood interval | unit tests (`test_selection.py`): hand values from normal tables, exact identities, agreement of the quadrature with the closed form for rare outcomes, recovery of a known theta |
-| `kfretransport/power.py` (new) | Fisher information and standard error for theta, power of the curve test and of the linear meta-regression test, the number of sites needed, a design table, and a seeded Monte Carlo check of the profile-likelihood test | unit tests (`test_power.py`): exact identities (power = alpha at theta = 0, linear <= curve), finite-difference derivatives, a hand-computed two-point design, Monte Carlo agreement |
+| `kfretransport/power.py` | Fisher information and standard error for theta, power of the curve test and of the linear meta-regression test, the number of sites needed, a design table, and a seeded Monte Carlo check of the profile-likelihood test | unit tests (`test_power.py`): exact identities (power = alpha at theta = 0, linear <= curve), finite-difference derivatives, a hand-computed two-point design, Monte Carlo agreement |
+| `kfretransport/nested.py` (new) | within-site nested-window design: band curve and its score, within-site information, a fit of theta with one intercept per site, a consistency check against the cross-site theta, the Poisson recency model by quadrature, recency bands from OMOP cohorts with small-band merging, and a masked public report | unit tests (`test_nested.py`): exact identities (telescoping sum, band 1 = tested curve, theta = 0 gives 1), finite-difference scores, hand values, recovery of a known theta, the short-window Poisson limit, and hand-traced bands on the invented OMOP extract |
 | `kfretransport/nhanes.py` | pre-registered public-data study: applies US testing patterns to NHANES 2007-2018, where everyone has a uACR, and measures what they do to KFRE scoring and uACR imputation | hand-worked unit tests on invented records (`test_nhanes.py`); **not run on NHANES yet** |
 | `kfretransport/albuminuria.py` | estimated uACR from a urine protein-to-creatinine ratio (Sumida et al. 2020 crude equation), for a sensitivity analysis only | tests that it reproduces five figures the paper reports (`test_albuminuria.py`); see provenance note below |
 | `kfretransport/sim.py` | synthetic multi-site study of informative uACR testing (4 scenarios) | property tests (`test_sim.py`); the full study is pre-registered and queued, **not run yet** |
@@ -116,6 +147,8 @@ python -m unittest discover -v
 python -m kfretransport.sim --k 200 --n 10000 --seed 20261116 --out-dir out
 python -m kfretransport.omop --cdm-dir path/to/omop_csv --out site-a.json
 python -m kfretransport.omop --cdm-dir path/to/omop_csv --out site-a-pcr.json --pcr-conversion
+python -m kfretransport.nested --cdm-dir path/to/omop_csv --out site-a-nested.json
+python -m kfretransport.nested --cdm-dir path/to/omop_csv --out site-a-nested-730.json --windows 90 365 730
 python -m kfretransport.pool site-a.json site-b.json site-c.json --out pooled.json --min-cell 20
 python -m kfretransport.nhanes --data-dir nhanes-data --out-dir out
 python -m kfretransport.selection --theta 0.1 0.3 0.69 --rates 0.1 0.25 0.4 0.63 0.9
@@ -131,6 +164,9 @@ python -m kfretransport.power --theta 0.3 0.69 --site-variance 0.02 --tau2 0.05 
 - [findings/protocol-addendum-2-2026-11-17.md](findings/protocol-addendum-2-2026-11-17.md):
   a secondary analysis that fits the selection-calibration curve across sites; prediction
   theta > 0.
+- [findings/protocol-addendum-3-2026-11-18.md](findings/protocol-addendum-3-2026-11-18.md):
+  the within-system nested-window test; prediction N1 theta > 0 from within-site contrasts, N3
+  agreement with the cross-site theta.
 - [findings/sim-prereg-v1-2026-11-16.md](findings/sim-prereg-v1-2026-11-16.md): simulation
   study, seven predictions (S1-S7), queued.
 - [findings/nhanes-testing-prereg-v1-2026-11-17.md](findings/nhanes-testing-prereg-v1-2026-11-17.md):
@@ -152,6 +188,7 @@ python -m kfretransport.power --theta 0.3 0.69 --site-variance 0.02 --tau2 0.05 
 - Excluded: any kidney replacement therapy (KRT) record on or before the index date.
 - uACR (LOINC 9318-7, 14959-1, 32294-1): the latest value in the 365 days up to the index
   date, converted to mg/g. People without one stay in the cohort as "untested".
+  (`nested.py` repeats the cohort with other windows; the cohort itself does not change.)
 - Outcome: the first KRT record after the index date (dialysis, transplant, dialysis
   dependence, transplant status), matched on standard **or** source concepts (ICD10CM Z99.2,
   Z94.0). Death first is a competing event. Follow-up ends at the end of the observation period.
@@ -179,7 +216,9 @@ primary analysis uses `tte_aj` with `se_log_oe_dm`.
 also masks anything that would give them back: the testing rate, a count recoverable by
 subtraction, and the Poisson variance (which is 1/events). This follows N3C's rule that no
 result about fewer than 20 people leaves its enclave (N3C's download guidance at n3c.ncats.nih.gov
-and the N3C governance paper, PMC10789985). Each enclave's own rules come first.
+and the N3C governance paper, PMC10789985). Each enclave's own rules come first. `nested.py`
+merges bands with fewer than 20 events and blanks any band count from 1 to 19, together with
+the cumulative counts and rates that would give it back.
 
 ### uPCR to uACR conversion (sensitivity analysis only, off by default)
 
@@ -218,6 +257,8 @@ site stands. Details and sources:
   any real or simulated multi-site data.
 - Power and sample size (0.2.4): analytic, with hand-computed values; the exact table and a
   larger Monte Carlo check are queued (`kfre-power-v1`).
+- Nested-window design (0.2.5): analytic, with tested code and a pre-registration (addendum 3);
+  not run on any database.
 - Evidence map v1 (2026-11-17): done; not estimable from published studies (2 of the 5 needed).
 - OMOP code: tested only on invented records. It has **not** yet run on any OMOP database,
   synthetic or real. A smoke test on OHDSI's public synthetic Synthea27Nj set is queued.
