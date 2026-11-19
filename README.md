@@ -29,7 +29,31 @@ who gets a urine albumin (uACR) test?**
   risk by about 7% (Ravani et al., JASN 2019;30:2219-2227, PMID 31540963). A transportability
   study must therefore say which "observed risk" it compares the KFRE with.
 
-## New in 0.2.5 (2026-11-18): a test that works inside one health system
+## New in 0.2.6 (2026-11-19): a person-level simulation of the whole analysis
+
+`kfretransport/sim2.py` generates synthetic people with full testing histories, follow-up,
+censoring and death as a competing event. It then runs the **same code a health system would
+run** (recency bands, Aalen-Johansen O/E, merging of small bands, the within-system fit of
+theta, the cross-site fit and the consistency check). Pre-registration, written before the
+first run:
+[findings/sim2-prereg-2026-11-19.md](findings/sim2-prereg-2026-11-19.md).
+
+- Six scenarios: threshold testing with theta = 0.69 and 0.30; testing unrelated to risk;
+  testing at a rate tied to risk (Poisson recency); threshold testing that also follows the
+  equation's own predictor; and death that is also tied to the hidden risk.
+- Seven graded predictions (P1-P7). The within-system test must recover theta with honest
+  intervals (P1, P2) and stay quiet without selection (P3). Under recency testing it must give a
+  smaller theta than the cross-site fit, as addendum 3 claims (P4). The consistency check must
+  not reject a true threshold model (P5), and the cross-site fit must recover theta (P6). The
+  known approximation error (risks saturate and death competes) must bias theta down, more so
+  when death is tied to risk (P7).
+- Before running, the prediction is stated that the risk-scale bias could cost P1 its coverage
+  even if the mean passes. If so, a risk-scale correction will go into the production fit,
+  in a dated addendum, before any real data.
+- `python -m kfretransport.sim2 --reps 200 --n 20000 --seed 20261119 --out-dir out`. **Not run
+  yet**; results will be published here whatever they show.
+
+## 0.2.5 (2026-11-18): a test that works inside one health system
 
 Comparing health systems mixes testing practice with everything else that differs between them.
 `kfretransport/nested.py` tests the selection curve **inside one system**. It keeps the cohort,
@@ -123,7 +147,7 @@ pre-specified secondary analysis
 ([findings/protocol-addendum-2-2026-11-17.md](findings/protocol-addendum-2-2026-11-17.md)).
 It has **not** been run on any real data.
 
-## What is here (version 0.2.5)
+## What is here (version 0.2.6)
 
 | Module | What it does | Checked by |
 |---|---|---|
@@ -132,7 +156,8 @@ It has **not** been run on any real data.
 | `kfretransport/pool.py` | pools site summaries from `omop.py` into the pre-declared primary and secondary analyses (random-effects O/E and meta-regression on the site's testing rate) and masks small cells in published per-site rows | hand-worked unit tests (`test_pool.py`) |
 | `kfretransport/selection.py` | the selection-calibration curve for tested and untested people, theta from one site's O/E, its exact risk-scale version by quadrature, and a multi-site fit of theta with a profile-likelihood interval | unit tests (`test_selection.py`): hand values from normal tables, exact identities, agreement of the quadrature with the closed form for rare outcomes, recovery of a known theta |
 | `kfretransport/power.py` | Fisher information and standard error for theta, power of the curve test and of the linear meta-regression test, the number of sites needed, a design table, and a seeded Monte Carlo check of the profile-likelihood test | unit tests (`test_power.py`): exact identities (power = alpha at theta = 0, linear <= curve), finite-difference derivatives, a hand-computed two-point design, Monte Carlo agreement |
-| `kfretransport/nested.py` (new) | within-site nested-window design: band curve and its score, within-site information, a fit of theta with one intercept per site, a consistency check against the cross-site theta, the Poisson recency model by quadrature, recency bands from OMOP cohorts with small-band merging, and a masked public report | unit tests (`test_nested.py`): exact identities (telescoping sum, band 1 = tested curve, theta = 0 gives 1), finite-difference scores, hand values, recovery of a known theta, the short-window Poisson limit, and hand-traced bands on the invented OMOP extract |
+| `kfretransport/nested.py` | within-site nested-window design: band curve and its score, within-site information, a fit of theta with one intercept per site, a consistency check against the cross-site theta, the Poisson recency model by quadrature, recency bands from OMOP cohorts with small-band merging, and a masked public report | unit tests (`test_nested.py`): exact identities (telescoping sum, band 1 = tested curve, theta = 0 gives 1), finite-difference scores, hand values, recovery of a known theta, the short-window Poisson limit, and hand-traced bands on the invented OMOP extract |
+| `kfretransport/sim2.py` (new) | person-level simulation of the whole analysis (threshold, recency and no-selection testing; censoring; death competing) with the grading of its seven pre-registered predictions | unit tests (`test_sim2.py`): generator shares against hand values, a hand-traced site (Aalen-Johansen with and without a competing death, Kaplan-Meier), determinism, and the summary and grading arithmetic on invented rows |
 | `kfretransport/nhanes.py` | pre-registered public-data study: applies US testing patterns to NHANES 2007-2018, where everyone has a uACR, and measures what they do to KFRE scoring and uACR imputation | hand-worked unit tests on invented records (`test_nhanes.py`); **not run on NHANES yet** |
 | `kfretransport/albuminuria.py` | estimated uACR from a urine protein-to-creatinine ratio (Sumida et al. 2020 crude equation), for a sensitivity analysis only | tests that it reproduces five figures the paper reports (`test_albuminuria.py`); see provenance note below |
 | `kfretransport/sim.py` | synthetic multi-site study of informative uACR testing (4 scenarios) | property tests (`test_sim.py`); the full study is pre-registered and queued, **not run yet** |
@@ -145,6 +170,7 @@ NHANES files and needs pandas to read them).
 ```
 python -m unittest discover -v
 python -m kfretransport.sim --k 200 --n 10000 --seed 20261116 --out-dir out
+python -m kfretransport.sim2 --reps 200 --n 20000 --seed 20261119 --out-dir out
 python -m kfretransport.omop --cdm-dir path/to/omop_csv --out site-a.json
 python -m kfretransport.omop --cdm-dir path/to/omop_csv --out site-a-pcr.json --pcr-conversion
 python -m kfretransport.nested --cdm-dir path/to/omop_csv --out site-a-nested.json
@@ -169,6 +195,8 @@ python -m kfretransport.power --theta 0.3 0.69 --site-variance 0.02 --tau2 0.05 
   agreement with the cross-site theta.
 - [findings/sim-prereg-v1-2026-11-16.md](findings/sim-prereg-v1-2026-11-16.md): simulation
   study, seven predictions (S1-S7), queued.
+- [findings/sim2-prereg-2026-11-19.md](findings/sim2-prereg-2026-11-19.md): person-level
+  simulation of the whole analysis, seven predictions (P1-P7), not run yet.
 - [findings/nhanes-testing-prereg-v1-2026-11-17.md](findings/nhanes-testing-prereg-v1-2026-11-17.md):
   NHANES study, four predictions (H1-H4), queued. Its primary estimand is the
   `selection_ratio`: how much more imputing uACR from tested people misstates the untested
@@ -251,7 +279,7 @@ site stands. Details and sources:
 ## Status
 
 - Unit tests: hand-traced. They must pass before any commit to this repository.
-- Simulation study v1 and NHANES study v1: pre-registered, queued, **not run yet**. Results
+- Simulation studies v1 and v2 and NHANES study v1: pre-registered, **not run yet**. Results
   will be published here whatever they show.
 - Selection-calibration curve (0.2.3): an analytic result plus tested code; not yet fitted to
   any real or simulated multi-site data.
@@ -259,6 +287,7 @@ site stands. Details and sources:
   larger Monte Carlo check are queued (`kfre-power-v1`).
 - Nested-window design (0.2.5): analytic, with tested code and a pre-registration (addendum 3);
   not run on any database.
+- Person-level simulation (0.2.6): tested code and a pre-registration; not run yet.
 - Evidence map v1 (2026-11-17): done; not estimable from published studies (2 of the 5 needed).
 - OMOP code: tested only on invented records. It has **not** yet run on any OMOP database,
   synthetic or real. A smoke test on OHDSI's public synthetic Synthea27Nj set is queued.
