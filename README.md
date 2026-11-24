@@ -29,7 +29,29 @@ who gets a urine albumin (uACR) test?**
   risk by about 7% (Ravani et al., JASN 2019;30:2219-2227, PMID 31540963). A transportability
   study must therefore say which "observed risk" it compares the KFRE with.
 
-## New in 0.2.6 (2026-11-19): a person-level simulation of the whole analysis
+## New in 0.2.7 (2026-11-24): the transport formula and a held-out test
+
+`kfretransport/transport.py` turns the selection-calibration curve into a **prediction for a
+health system the fit has not seen**: its log O/E among the tested, from its testing rate alone,
+with a 95% prediction interval (linearised fit variance + between-site variance tau2 + the new
+site's own sampling variance). `leave_one_out()` then checks whether that prediction is any good:
+each site is predicted from the others, by the curve and by a random-effects mean that ignores
+testing, and the two are compared.
+
+- Pre-registered before any data:
+  [findings/protocol-addendum-4-2026-11-24.md](findings/protocol-addendum-4-2026-11-24.md).
+  T1: the curve predicts left-out sites better than the random-effects mean (skill > 0 and a win
+  at more than half the sites). T2: at least 85% of left-out sites fall inside the curve's 95%
+  prediction intervals. T3 (descriptive): stability of theta when one site is dropped. In Phase 2,
+  partners that join later are predicted, and the prediction is committed publicly, before their
+  outcomes are pooled.
+- Said in advance: if theta is near 0 the curve spends a parameter for nothing and T1 fails, which
+  is the right answer.
+- `python -m kfretransport.transport --sites sites.json --tau2 0.05 --loo --predict 0.15`
+  (site summaries as `[{"rate": p, "log_oe": y, "variance": v}, ...]`). Tested only on invented
+  numbers; **not run on any real or simulated multi-site data yet**.
+
+## 0.2.6 (2026-11-19): a person-level simulation of the whole analysis
 
 `kfretransport/sim2.py` generates synthetic people with full testing histories, follow-up,
 censoring and death as a competing event. It then runs the **same code a health system would
@@ -51,7 +73,7 @@ first run:
   even if the mean passes. If so, a risk-scale correction will go into the production fit,
   in a dated addendum, before any real data.
 - `python -m kfretransport.sim2 --reps 200 --n 20000 --seed 20261119 --out-dir out`. **Not run
-  yet**; results will be published here whatever they show.
+  yet** (queued since 2026-11-24); results will be published here whatever they show.
 
 ## 0.2.5 (2026-11-18): a test that works inside one health system
 
@@ -147,7 +169,7 @@ pre-specified secondary analysis
 ([findings/protocol-addendum-2-2026-11-17.md](findings/protocol-addendum-2-2026-11-17.md)).
 It has **not** been run on any real data.
 
-## What is here (version 0.2.6)
+## What is here (version 0.2.7)
 
 | Module | What it does | Checked by |
 |---|---|---|
@@ -155,9 +177,10 @@ It has **not** been run on any real data.
 | `kfretransport/metrics.py` | O/E, Brier, C-statistic, logistic calibration slope/intercept and calibration-in-the-large, DerSimonian-Laird pooling with I^2 and a 95% prediction interval for a new site, random-effects meta-regression with Knapp-Hartung inference, Aalen-Johansen cumulative incidence (death competing), 1 - Kaplan-Meier (death censored), time-to-event O/E; delta-method (Greenwood-type) variance of the Aalen-Johansen estimate and `se_log_oe_dm` | hand-worked unit tests (`test_metrics.py`), including checks that the variance equals the multinomial variance without censoring and Greenwood's variance without competing events |
 | `kfretransport/pool.py` | pools site summaries from `omop.py` into the pre-declared primary and secondary analyses (random-effects O/E and meta-regression on the site's testing rate) and masks small cells in published per-site rows | hand-worked unit tests (`test_pool.py`) |
 | `kfretransport/selection.py` | the selection-calibration curve for tested and untested people, theta from one site's O/E, its exact risk-scale version by quadrature, and a multi-site fit of theta with a profile-likelihood interval | unit tests (`test_selection.py`): hand values from normal tables, exact identities, agreement of the quadrature with the closed form for rare outcomes, recovery of a known theta |
+| `kfretransport/transport.py` (new) | the transport formula: a new site's predicted log O/E among the tested from its testing rate, with a 95% prediction interval; the null (random-effects mean) prediction; and the leave-one-site-out test of addendum 4 (skill, wins, interval coverage, theta stability) | unit tests (`test_transport.py`): hand values of the score, the score as the derivative of the curve, the covariance against weighted-regression identities and a two-point hand value, exact recovery of a known curve, shift invariance, the null by hand, a noisy curve beating the null, and the command line |
 | `kfretransport/power.py` | Fisher information and standard error for theta, power of the curve test and of the linear meta-regression test, the number of sites needed, a design table, and a seeded Monte Carlo check of the profile-likelihood test | unit tests (`test_power.py`): exact identities (power = alpha at theta = 0, linear <= curve), finite-difference derivatives, a hand-computed two-point design, Monte Carlo agreement |
 | `kfretransport/nested.py` | within-site nested-window design: band curve and its score, within-site information, a fit of theta with one intercept per site, a consistency check against the cross-site theta, the Poisson recency model by quadrature, recency bands from OMOP cohorts with small-band merging, and a masked public report | unit tests (`test_nested.py`): exact identities (telescoping sum, band 1 = tested curve, theta = 0 gives 1), finite-difference scores, hand values, recovery of a known theta, the short-window Poisson limit, and hand-traced bands on the invented OMOP extract |
-| `kfretransport/sim2.py` (new) | person-level simulation of the whole analysis (threshold, recency and no-selection testing; censoring; death competing) with the grading of its seven pre-registered predictions | unit tests (`test_sim2.py`): generator shares against hand values, a hand-traced site (Aalen-Johansen with and without a competing death, Kaplan-Meier), determinism, and the summary and grading arithmetic on invented rows |
+| `kfretransport/sim2.py` | person-level simulation of the whole analysis (threshold, recency and no-selection testing; censoring; death competing) with the grading of its seven pre-registered predictions | unit tests (`test_sim2.py`): generator shares against hand values, a hand-traced site (Aalen-Johansen with and without a competing death, Kaplan-Meier), determinism, and the summary and grading arithmetic on invented rows |
 | `kfretransport/nhanes.py` | pre-registered public-data study: applies US testing patterns to NHANES 2007-2018, where everyone has a uACR, and measures what they do to KFRE scoring and uACR imputation | hand-worked unit tests on invented records (`test_nhanes.py`); **not run on NHANES yet** |
 | `kfretransport/albuminuria.py` | estimated uACR from a urine protein-to-creatinine ratio (Sumida et al. 2020 crude equation), for a sensitivity analysis only | tests that it reproduces five figures the paper reports (`test_albuminuria.py`); see provenance note below |
 | `kfretransport/sim.py` | synthetic multi-site study of informative uACR testing (4 scenarios) | property tests (`test_sim.py`); the full study is pre-registered and queued, **not run yet** |
@@ -176,6 +199,7 @@ python -m kfretransport.omop --cdm-dir path/to/omop_csv --out site-a-pcr.json --
 python -m kfretransport.nested --cdm-dir path/to/omop_csv --out site-a-nested.json
 python -m kfretransport.nested --cdm-dir path/to/omop_csv --out site-a-nested-730.json --windows 90 365 730
 python -m kfretransport.pool site-a.json site-b.json site-c.json --out pooled.json --min-cell 20
+python -m kfretransport.transport --sites sites.json --tau2 0.05 --loo --predict 0.15
 python -m kfretransport.nhanes --data-dir nhanes-data --out-dir out
 python -m kfretransport.selection --theta 0.1 0.3 0.69 --rates 0.1 0.25 0.4 0.63 0.9
 python -m kfretransport.power --theta 0.3 0.69 --site-variance 0.02 --tau2 0.05 --spread 0.1 0.7
@@ -193,10 +217,13 @@ python -m kfretransport.power --theta 0.3 0.69 --site-variance 0.02 --tau2 0.05 
 - [findings/protocol-addendum-3-2026-11-18.md](findings/protocol-addendum-3-2026-11-18.md):
   the within-system nested-window test; prediction N1 theta > 0 from within-site contrasts, N3
   agreement with the cross-site theta.
+- [findings/protocol-addendum-4-2026-11-24.md](findings/protocol-addendum-4-2026-11-24.md):
+  the held-out transport test; T1 the curve predicts left-out sites better than the
+  random-effects mean, T2 honest 95% prediction intervals, T3 stability (descriptive).
 - [findings/sim-prereg-v1-2026-11-16.md](findings/sim-prereg-v1-2026-11-16.md): simulation
   study, seven predictions (S1-S7), queued.
 - [findings/sim2-prereg-2026-11-19.md](findings/sim2-prereg-2026-11-19.md): person-level
-  simulation of the whole analysis, seven predictions (P1-P7), not run yet.
+  simulation of the whole analysis, seven predictions (P1-P7), queued.
 - [findings/nhanes-testing-prereg-v1-2026-11-17.md](findings/nhanes-testing-prereg-v1-2026-11-17.md):
   NHANES study, four predictions (H1-H4), queued. Its primary estimand is the
   `selection_ratio`: how much more imputing uACR from tested people misstates the untested
@@ -279,8 +306,8 @@ site stands. Details and sources:
 ## Status
 
 - Unit tests: hand-traced. They must pass before any commit to this repository.
-- Simulation studies v1 and v2 and NHANES study v1: pre-registered, **not run yet**. Results
-  will be published here whatever they show.
+- Simulation studies v1 and v2 and NHANES study v1: pre-registered, **not run yet** (queued for
+  compute). Results will be published here whatever they show.
 - Selection-calibration curve (0.2.3): an analytic result plus tested code; not yet fitted to
   any real or simulated multi-site data.
 - Power and sample size (0.2.4): analytic, with hand-computed values; the exact table and a
@@ -288,6 +315,8 @@ site stands. Details and sources:
 - Nested-window design (0.2.5): analytic, with tested code and a pre-registration (addendum 3);
   not run on any database.
 - Person-level simulation (0.2.6): tested code and a pre-registration; not run yet.
+- Transport formula and held-out test (0.2.7): tested code and a pre-registration (addendum 4);
+  not run on any real or simulated multi-site data.
 - Evidence map v1 (2026-11-17): done; not estimable from published studies (2 of the 5 needed).
 - OMOP code: tested only on invented records. It has **not** yet run on any OMOP database,
   synthetic or real. A smoke test on OHDSI's public synthetic Synthea27Nj set is queued.
